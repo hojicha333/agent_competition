@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="思源智审，交我创智能体创新大赛初赛演示。导入培养方案，在浏览器内完成推免学业核查与毕业预审。">
+  <title>思源智审 · 学业审查工作台</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell topbar-inner">
+      <a class="brand" href="./" aria-label="思源智审首页"><img src="./favicon.svg" width="38" height="38" alt=""><span>思源智审</span></a>
+      <span class="privacy"><span aria-hidden="true"></span> PDF 仅在浏览器内处理</span>
+    </div>
+  </header>
+  <main class="shell">
+    <div class="intro">
+      <div>
+        <p class="eyebrow">交我创 · 智能体创新大赛</p>
+        <h1>学业审查工作台</h1>
+        <p>对照培养方案核查推免和毕业的学业要求，查看课程依据、学分缺口与待复核事项。</p>
+      </div>
+      <button type="button" id="demoBtn" class="button dark">载入演示材料 <span aria-hidden="true">↗</span></button>
+    </div>
+
+    <div class="workflow">
+      <section class="card" aria-labelledby="planHeading">
+        <div class="card-heading"><span class="step">1</span><div><h2 id="planHeading">培养方案</h2><p>导入文字型 PDF，核对课程与模块后启用。</p></div></div>
+        <div class="card-body">
+          <div class="file-actions">
+            <button type="button" id="choosePlan" class="button outline">选择培养方案 PDF</button>
+            <a href="https://i.sjtu.edu.cn/jxzxjhgl/pyjhxxcx_cxPyjhxxIndex.html" target="_blank" rel="noopener noreferrer">打开 i.sjtu 选取方案 <span aria-hidden="true">↗</span></a>
+            <input id="planInput" type="file" accept=".pdf,application/pdf" hidden>
+          </div>
+          <p class="hint">在 i.sjtu 按年级、学院和专业选中方案，从预览保存 PDF 后导入。</p>
+          <p id="planStatus" class="notice" role="status" hidden></p>
+          <form id="planPreview" class="preview" hidden>
+            <p class="source" id="planSource"></p>
+            <div class="identity-fields">
+              <label for="planYear">入学年份<input id="planYear" type="number" min="1900" max="2200" required></label>
+              <label for="planMajor">专业（与修业记录一致）<input id="planMajor" type="text" maxlength="100" required></label>
+            </div>
+            <p id="planSummary" class="preview-summary"></p>
+            <details><summary>查看识别的课程与规则原文</summary><div id="planEvidence"></div></details>
+            <label class="acknowledge"><input id="planConfirmed" type="checkbox" required> 我已核对课程、学分和原文，确认用于本次审查。</label>
+            <div class="file-actions"><button class="button primary" type="submit">确认并启用</button><button type="button" id="discardPlan" class="button outline">取消导入</button></div>
+          </form>
+          <label class="plan-field" for="planSelect">使用的培养方案<select id="planSelect"><option value="">请选择方案</option></select></label>
+          <p class="hint" id="activePlanSource" hidden></p>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="auditHeading">
+        <div class="card-heading"><span class="step">2</span><div><h2 id="auditHeading">学业审查</h2><p>使用同一份修业记录，分别运行两种审查。</p></div></div>
+        <form id="auditForm" class="card-body">
+          <fieldset class="modes"><legend class="visually-hidden">审查类型</legend>
+            <label><input type="radio" name="mode" value="recommendation" checked><span><strong>推免学业审查</strong><small>截至选定学期</small></span></label>
+            <label><input type="radio" name="mode" value="graduation"><span><strong>毕业预审</strong><small>核对全部培养要求</small></span></label>
+          </fieldset>
+          <p class="hint mode-hint" id="modeHint"></p>
+          <label id="termField" for="term">截止学期末<select id="term"></select></label>
+          <div class="file-actions student-upload">
+            <button id="chooseRecords" type="button" class="button outline">选择修业记录 PDF</button>
+            <button type="button" id="clearRecords" class="text-button" hidden>清除文件</button>
+            <input id="recordsInput" type="file" accept=".pdf,application/pdf" multiple hidden>
+          </div>
+          <p id="recordStatus" class="hint record-status" role="status">支持教务导出的文字型 PDF，可选择多个文件。</p>
+          <div class="audit-action"><button id="runBtn" class="button primary" type="submit" disabled>运行推免学业审查 <span aria-hidden="true">→</span></button></div>
+          <p id="auditStatus" class="notice" role="status" hidden></p>
+        </form>
+      </section>
+    </div>
+
+    <section class="card results" aria-labelledby="resultsHeading">
+      <div class="card-heading result-heading"><div class="heading-main"><span class="step">3</span><div><h2 id="resultsHeading" tabindex="-1">审查结果</h2><p id="resultContext">审查完成后可查看逐项依据。</p></div></div>
+      <button id="exportBtn" type="button" class="button outline" hidden>导出 Excel</button></div>
+      <div id="results" class="card-body" hidden></div>
+      <p id="exportStatus" class="notice" role="status" hidden></p>
+    </section>
+    <footer><p>初赛演示 · 结果供人工复核，正式资格以学校和学院认定为准。</p><div><a href="./demo/plan.pdf" download>演示培养方案</a><a href="./demo/records.pdf" download>演示修业记录</a></div></footer>
+  </main>
+  <dialog id="detailDialog" aria-labelledby="detailTitle">
+    <div class="dialog-top"><div><h2 id="detailTitle"></h2><p id="detailMeta" class="hint"></p></div><button class="icon-button" type="button" aria-label="关闭审查明细">×</button></div>
+    <div id="detailBody" class="dialog-body"></div>
+  </dialog>
+</body>
+</html>
