@@ -9,7 +9,7 @@ const $ = id => document.getElementById(id);
 const mb = 1024 ** 2;
 const storageKey = 'siyuan-reviewed-plans-v1';
 const plans = new Map();
-const state = { busy: false, draft: null, records: [], result: null };
+const state = { busy: false, draft: null, records: [], result: null, deletePlanKey: null };
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[character]);
@@ -31,7 +31,9 @@ function updateControls() {
     'recordsInput', 'planInput', 'planYear', 'planMajor', 'planConfirmed', 'discardPlan',
   ];
   for (const id of controls) $(id).disabled = state.busy;
-  for (const control of document.querySelectorAll('#planPreview button, [name="mode"]')) control.disabled = state.busy;
+  for (const control of document.querySelectorAll('#planPreview button, #planList button, #deletePlanForm button, [name="mode"]')) {
+    control.disabled = state.busy;
+  }
   $('term').disabled = state.busy || isGraduation();
   $('runBtn').disabled = state.busy || !plans.size || !state.records.length;
 }
@@ -58,15 +60,37 @@ function updateMode() {
 function refreshPlans() {
   $('planEmpty').hidden = plans.size > 0;
   $('planList').hidden = !plans.size;
-  $('planList').innerHTML = [...plans.values()].map(plan =>
-    `<li><strong>${escape(planLabel(plan))}</strong><span class="hint">${escape(plan.source)}</span></li>`
+  $('planList').innerHTML = [...plans.entries()].map(([key, plan]) =>
+    `<li><div><strong>${escape(planLabel(plan))}</strong><span class="hint">${escape(plan.source)}</span></div>
+    <button class="text-button" type="button" data-plan-key="${escape(key)}" aria-label="删除${escape(planLabel(plan))}培养方案">删除</button></li>`
   ).join('');
   updateControls();
 }
 
+function readSavedPlans() {
+  return JSON.parse(localStorage.getItem(storageKey) || '[]');
+}
+
+function savePlanChange(key, replacement, expected) {
+  const update = () => {
+    const latest = readSavedPlans();
+    const index = latest.findIndex(plan => plan && planKey(plan.cohort_year, plan.major) === key);
+    if (expected && index >= 0 && JSON.stringify(latest[index]) !== JSON.stringify(expected)) return false;
+    if (replacement) {
+      if (index < 0) latest.push(replacement);
+      else latest[index] = replacement;
+    } else if (index >= 0) {
+      latest.splice(index, 1);
+    }
+    localStorage.setItem(storageKey, JSON.stringify(latest));
+    return true;
+  };
+  return navigator.locks ? navigator.locks.request(storageKey, update) : update();
+}
+
 function loadPlans() {
   try {
-    const choices = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    const choices = readSavedPlans();
     for (const plan of choices) {
       if (plan?.schema_version !== 2 || !plan.reviewed) continue;
       try {
@@ -122,28 +146,78 @@ function discardDraft() {
   $('planPreview').hidden = true;
 }
 
-function storePlan(event) {
+async function storePlan(event) {
   event.preventDefault();
   if (!state.draft || state.busy) return;
   const plan = { ...state.draft, major: $('planMajor').value.trim(), cohort_year: $('planYear').valueAsNumber, reviewed: true };
   try {
     validatePlan(plan, { active: true });
-    const key = planKey(plan.cohort_year, plan.major);
-    const replacing = plans.has(key);
-    plans.set(key, plan);
-    discardDraft();
-    clearResult();
-    refreshPlans();
-    try {
-      localStorage.setItem(storageKey, JSON.stringify([...plans.values()]));
-    } catch {
-      status('planStatus', '方案已启用。浏览器存储不可用，刷新后需重新导入。');
-      return;
-    }
-    status('planStatus', `${planLabel(plan)}培养方案已${replacing ? '更新' : '启用'}。`);
   } catch (error) {
     status('planStatus', error.message, true);
+    return;
   }
+  const key = planKey(plan.cohort_year, plan.major);
+  const replacing = plans.has(key);
+  state.busy = true;
+  updateControls();
+  let saved = true;
+  try {
+    await savePlanChange(key, plan);
+  } catch {
+    saved = false;
+  }
+  plans.set(key, plan);
+  discardDraft();
+  clearResult();
+  state.busy = false;
+  refreshPlans();
+  status('planStatus', saved ? `${planLabel(plan)}培养方案已${replacing ? '更新' : '启用'}。`
+    : '方案已启用。浏览器存储不可用，刷新后需重新导入。');
+}
+
+function showDeletePlan(event) {
+  const button = event.target.closest('[data-plan-key]');
+  if (!button || state.busy) return;
+  const key = button.dataset.planKey;
+  const plan = plans.get(key);
+  if (!plan) return;
+  state.deletePlanKey = key;
+  $('deletePlanSummary').textContent = `${planLabel(plan)} · ${plan.source}`;
+  $('deletePlanDialog').showModal();
+}
+
+async function deletePlan(event) {
+  event.preventDefault();
+  const key = state.deletePlanKey;
+  const plan = plans.get(key);
+  if (!plan || state.busy) return;
+  state.busy = true;
+  updateControls();
+  let message = `已删除 ${planLabel(plan)}培养方案。`;
+  let saved = true;
+  let deleted = false;
+  try {
+    deleted = await savePlanChange(key, null, plan);
+    if (!deleted) {
+      saved = false;
+      message = '这份方案已在其他页面更新，请刷新后再删除。';
+    }
+  } catch {
+    deleted = true;
+    saved = false;
+    message = '方案已从当前页面移除。本机存储未更新，刷新后可能恢复。';
+  }
+  state.busy = false;
+  $('deletePlanDialog').close();
+  if (deleted) {
+    plans.delete(key);
+    clearResult();
+    refreshPlans();
+    ($('planList').querySelector('button') || $('choosePlan')).focus();
+  } else {
+    updateControls();
+  }
+  status('planStatus', message, !saved);
 }
 
 function setRecords(files) {
@@ -294,6 +368,13 @@ $('planInput').addEventListener('change', async event => {
   }
 });
 $('planPreview').addEventListener('submit', storePlan);
+$('planList').addEventListener('click', showDeletePlan);
+$('deletePlanForm').addEventListener('submit', deletePlan);
+$('cancelPlanDelete').addEventListener('click', () => $('deletePlanDialog').close());
+$('deletePlanDialog').addEventListener('cancel', event => {
+  if (state.busy) event.preventDefault();
+});
+$('deletePlanDialog').addEventListener('close', () => { state.deletePlanKey = null; });
 $('discardPlan').addEventListener('click', () => {
   discardDraft();
   status('planStatus', '');

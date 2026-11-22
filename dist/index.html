@@ -88,5 +88,18 @@
     <div class="dialog-top"><div><h2 id="detailTitle"></h2><p id="detailMeta" class="hint"></p></div><button class="icon-button" type="button" aria-label="关闭审查明细">×</button></div>
     <div id="detailBody" class="dialog-body"></div>
   </dialog>
+  <dialog id="deletePlanDialog" aria-labelledby="deletePlanTitle" aria-describedby="deletePlanSummary">
+    <form id="deletePlanForm">
+      <div class="dialog-top"><h2 id="deletePlanTitle">删除培养方案？</h2></div>
+      <div class="dialog-body">
+        <p id="deletePlanSummary"></p>
+        <p class="hint">删除后，这份方案将不再参与自动匹配。需要时可以重新导入 PDF。</p>
+        <div class="dialog-actions">
+          <button id="cancelPlanDelete" class="button outline" type="button" autofocus>取消</button>
+          <button class="button danger" type="submit">确认删除</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>
