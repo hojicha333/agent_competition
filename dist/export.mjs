@@ -13,7 +13,7 @@ export function workbookRows(data){
   return data.mode==='recommendation'?sheets:withRecordAudit(sheets,data);
 }
 function baseWorkbookRows(data){
-  if(data.students.some(s=>s.schema_version===2))return configuredWorkbookRows(data,sortStudents);
+  if(data.applied_plans||data.students.some(s=>s.schema_version===2))return configuredWorkbookRows(data,sortStudents);
   const finalAudit=data.term===FULL_AUDIT;
   const summary=[['姓名','学号','专业','审查判断',...courseCheckHeaders(data.term),'通识','个性化','交叉','游泳技能','英语水平考',...(!finalAudit?['此前课程问题','本学期课程问题']:[]),'必修问题','通识已获学分','通识最低需补学分','个性化已获学分','个性化差学分','交叉已获学分','交叉差学分',finalAudit?'其他限选':'其他限选（阶段）','其他限选问题','判断依据','补充说明','来源页码']];
   const history=[['姓名','学号','专业','核对项目','要求数量/学分','已通过/认可','有修读记录','缺修读记录','单位','记录依据']];

@@ -23,7 +23,6 @@
         <h1>学业审查工作台</h1>
         <p>对照培养方案核查推免和毕业的学业要求，查看课程依据、学分缺口与待复核事项。</p>
       </div>
-      <button type="button" id="demoBtn" class="button dark">载入演示材料 <span aria-hidden="true">↗</span></button>
     </div>
 
     <div class="workflow">
@@ -45,16 +44,19 @@
             </div>
             <p id="planSummary" class="preview-summary"></p>
             <details><summary>查看识别的课程与规则原文</summary><div id="planEvidence"></div></details>
-            <label class="acknowledge"><input id="planConfirmed" type="checkbox" required> 我已核对课程、学分和原文，确认用于本次审查。</label>
+            <label class="acknowledge"><input id="planConfirmed" type="checkbox" required> 我已核对课程、学分和原文，确认启用此方案。</label>
             <div class="file-actions"><button class="button primary" type="submit">确认并启用</button><button type="button" id="discardPlan" class="button outline">取消导入</button></div>
           </form>
-          <label class="plan-field" for="planSelect">使用的培养方案<select id="planSelect"><option value="">请选择方案</option></select></label>
-          <p class="hint" id="activePlanSource" hidden></p>
+          <div class="plan-field">
+            <h3>已导入的培养方案</h3>
+            <p id="planEmpty" class="hint">请先手动导入至少一份培养方案。</p>
+            <ul id="planList" class="plan-list" hidden></ul>
+          </div>
         </div>
       </section>
 
       <section class="card" aria-labelledby="auditHeading">
-        <div class="card-heading"><span class="step">2</span><div><h2 id="auditHeading">学业审查</h2><p>使用同一份修业记录，分别运行两种审查。</p></div></div>
+        <div class="card-heading"><span class="step">2</span><div><h2 id="auditHeading">学业审查</h2><p>按每名学生的入学年级和专业自动匹配方案。</p></div></div>
         <form id="auditForm" class="card-body">
           <fieldset class="modes"><legend class="visually-hidden">审查类型</legend>
             <label><input type="radio" name="mode" value="recommendation" checked><span><strong>推免学业审查</strong><small>截至选定学期</small></span></label>
@@ -80,7 +82,7 @@
       <div id="results" class="card-body" hidden></div>
       <p id="exportStatus" class="notice" role="status" hidden></p>
     </section>
-    <footer><p>初赛演示 · 结果供人工复核，正式资格以学校和学院认定为准。</p><div><a href="./demo/plan.pdf" download>演示培养方案</a><a href="./demo/records.pdf" download>演示修业记录</a></div></footer>
+    <footer><p>初赛演示 · 结果供人工复核，正式资格以学校和学院认定为准。</p><div><a href="./demo/plan.pdf" download="工程示例培养方案.pdf">工程示例方案</a><a href="./demo/plan-design.pdf" download="设计示例培养方案.pdf">设计示例方案</a><a href="./demo/records.pdf" download="混合专业修业记录.pdf">混合专业修业记录</a></div></footer>
   </main>
   <dialog id="detailDialog" aria-labelledby="detailTitle">
     <div class="dialog-top"><div><h2 id="detailTitle"></h2><p id="detailMeta" class="hint"></p></div><button class="icon-button" type="button" aria-label="关闭审查明细">×</button></div>

@@ -27,7 +27,7 @@ function lines(items){
   return groups.sort((a,b)=>a.cy-b.cy).map(g=>({...g,text:g.items.sort((a,b)=>a.x0-b.x0).map(i=>i.text).join(' ')}));
 }
 export class StudentParser{
-  constructor({majors=MAJORS}={}){this.majors=[...majors];this.students=[];this.skipped=[];this.student=null;this.section=null;this.summaryMode=false;this.transferMode=false;this.skipping=false;this.skippedStudent=null;}
+  constructor({majors=MAJORS,matchMajor}={}){this.majors=[...majors];this.matchMajor=matchMajor||((name)=>this.majors.find(major=>norm(major)===name));this.students=[];this.skipped=[];this.student=null;this.section=null;this.summaryMode=false;this.transferMode=false;this.skipping=false;this.skippedStudent=null;}
   startFile(name){this.filename=name;this.student=null;this.section=null;this.summaryMode=false;this.transferMode=false;this.skipping=false;this.skippedStudent=null;}
   page(items,pn,width=595){
     if(Math.abs(width-595)>5) throw new Error(`${this.filename} 第${pn}页：PDF版式与当前教务导出格式不同，请使用原始修业情况PDF。`);
@@ -37,13 +37,13 @@ export class StudentParser{
       const sid=cell(items,110,250,85,105).match(/学号[:：]\s*(\d+)/)?.[1];
       const majorText=clean(cell(items,350,445,50,85));
       const majorName=norm(majorText).replace(/^专业(?:名称)?[:：]?/,'');
-      const major=this.majors.find(m=>norm(m)===majorName);
       const cohort=cell(items,250,340,85,105).match(/年级[:：]\s*(\d{4})/)?.[1]||'';
       const enrollment=cell(items,225,335,100,120).replace(/^学籍状态[:：]\s*/,'').trim();
       if(!name||!sid||!majorName)throw new Error(`${this.filename} 第${pn}页：无法完整识别姓名、学号或专业。`);
+      const major=this.matchMajor(majorName,cohort);
       this.skipping=!major;this.section=null;this.summaryMode=false;this.transferMode=false;this.skippedStudent=null;
       if(this.skipping){
-        this.student=null;this.skippedStudent={name,sid,major:majorName,file:this.filename,start_page:pn,end_page:pn};this.skipped.push(this.skippedStudent);return;
+        this.student=null;this.skippedStudent={name,sid,major:majorName,cohort,file:this.filename,start_page:pn,end_page:pn};this.skipped.push(this.skippedStudent);return;
       }
       this.student={name,sid,major,cohort,enrollment,file:this.filename,start_page:pn,end_page:pn,sections:[],summary:[],transfers:[],flags:{},warnings:[]};
       this.students.push(this.student);this.section=null;this.summaryMode=true;this.transferMode=false;

@@ -1,16 +1,15 @@
 import { StudentParser } from './engine.mjs';
 import { PlanParser } from './plan-import.mjs';
-import { legacyToConfig, normalize, validatePlan } from './rule-schema.mjs';
+import { planKey, planLabel, validatePlan } from './rule-schema.mjs';
 import { readPdf } from './pdf-reader.mjs';
-import { graduationScope, recommendationScope, reviewStudent } from './review.mjs';
+import { describeUnmatched, graduationScope, recommendationScope, reviewStudent } from './review.mjs';
 import { auditTermLabel, auditTermOptions, defaultAuditTerm, FULL_AUDIT, parseAuditTerm } from './terms.mjs';
 
 const $ = id => document.getElementById(id);
 const mb = 1024 ** 2;
 const storageKey = 'siyuan-reviewed-plans-v1';
-const demoTerm = '2025-2026-1';
 const plans = new Map();
-const state = { busy: false, draft: null, records: [], demoRecords: false, result: null };
+const state = { busy: false, draft: null, records: [], result: null };
 const escape = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[character]);
@@ -28,13 +27,13 @@ function isGraduation() {
 
 function updateControls() {
   const controls = [
-    'demoBtn', 'choosePlan', 'planSelect', 'chooseRecords', 'clearRecords',
+    'choosePlan', 'chooseRecords', 'clearRecords',
     'recordsInput', 'planInput', 'planYear', 'planMajor', 'planConfirmed', 'discardPlan',
   ];
   for (const id of controls) $(id).disabled = state.busy;
   for (const control of document.querySelectorAll('#planPreview button, [name="mode"]')) control.disabled = state.busy;
   $('term').disabled = state.busy || isGraduation();
-  $('runBtn').disabled = state.busy || !$('planSelect').value || !state.records.length;
+  $('runBtn').disabled = state.busy || !plans.size || !state.records.length;
 }
 
 function clearResult() {
@@ -56,53 +55,31 @@ function updateMode() {
   updateControls();
 }
 
-function refreshPlans(selected = $('planSelect').value) {
-  $('planSelect').replaceChildren(new Option('请选择方案', ''));
-  for (const [key, entry] of plans) {
-    const type = { demo: '演示', local: '已导入', builtin: '内置' }[entry.type];
-    const plan = entry.plan;
-    $('planSelect').add(new Option(`${plan.cohort_year}级 · ${plan.major}（${type}）`, key));
-  }
-  $('planSelect').value = plans.has(selected) ? selected : '';
-  renderActivePlan();
-}
-
-function renderActivePlan() {
-  const { plan } = plans.get($('planSelect').value) || {};
-  $('activePlanSource').hidden = !plan;
-  $('activePlanSource').textContent = plan ? `来源 · ${plan.source}` : '';
+function refreshPlans() {
+  $('planEmpty').hidden = plans.size > 0;
+  $('planList').hidden = !plans.size;
+  $('planList').innerHTML = [...plans.values()].map(plan =>
+    `<li><strong>${escape(planLabel(plan))}</strong><span class="hint">${escape(plan.source)}</span></li>`
+  ).join('');
   updateControls();
 }
 
-function planKey(plan, type) {
-  return JSON.stringify([type, plan.cohort_year, normalize(plan.major)]);
-}
-
-async function loadPlans() {
+function loadPlans() {
   try {
     const choices = JSON.parse(localStorage.getItem(storageKey) || '[]');
     for (const plan of choices) {
-      validatePlan(plan, { active: true });
-      if (plan.schema_version !== 2 || !plan.reviewed) continue;
-      plans.set(planKey(plan, 'local'), { plan, type: 'local' });
+      if (plan?.schema_version !== 2 || !plan.reviewed) continue;
+      try {
+        validatePlan(plan, { active: true });
+        plans.set(planKey(plan.cohort_year, plan.major), plan);
+      } catch {
+        status('planStatus', '部分本机培养方案无法读取，可重新导入 PDF。', true);
+      }
     }
   } catch {
-    status('planStatus', '部分本机培养方案无法读取，可重新导入 PDF。', true);
+    status('planStatus', '本机培养方案无法读取，可重新导入 PDF。', true);
   }
   refreshPlans();
-  try {
-    const response = await fetch('./rules.json');
-    if (!response.ok) throw new Error('无法读取内置方案');
-    const bundled = await response.json();
-    const selection = $('planSelect').value;
-    for (const [major, original] of Object.entries(bundled)) {
-      const plan = legacyToConfig(original, major);
-      plans.set(planKey(plan, 'builtin'), { plan, type: 'builtin' });
-    }
-    refreshPlans(selection);
-  } catch {
-    if (!state.busy && !state.draft) status('planStatus', '内置方案暂不可用，可以自行导入 PDF。', true);
-  }
 }
 
 function table(headers, rows) {
@@ -117,8 +94,8 @@ async function parsePlan(file) {
   return parser.finish();
 }
 
-function showDraft(plan, demo = false) {
-  state.draft = { plan, demo };
+function showDraft(plan) {
+  state.draft = plan;
   $('planPreview').hidden = false;
   $('planPreview').querySelector('details').open = false;
   $('planYear').value = plan.cohort_year ?? '';
@@ -137,7 +114,7 @@ function showDraft(plan, demo = false) {
     + (modules.length ? '<h3>学分模块</h3>' + table(['模块', '最低学分', '最低门数', '页码'], modules) : '')
     + (repetitions.length ? '<h3>修读次数</h3>' + table(['规则', '次数', '课程代码'], repetitions) : '')
     + (notes.length ? '<h3>原文与识别说明</h3>' + table(['页码', '原文', '说明'], notes) : '');
-  status('planStatus', demo ? '演示材料已载入，请核对并启用培养方案。' : 'PDF 已读取。请核对培养方案适用的年级、专业及审查条款。');
+  status('planStatus', 'PDF 已读取。请核对培养方案适用的年级、专业及审查条款。');
 }
 
 function discardDraft() {
@@ -148,98 +125,65 @@ function discardDraft() {
 function storePlan(event) {
   event.preventDefault();
   if (!state.draft || state.busy) return;
-  const type = state.draft.demo ? 'demo' : 'local';
-  const plan = { ...state.draft.plan, major: $('planMajor').value.trim(), cohort_year: $('planYear').valueAsNumber, reviewed: true };
+  const plan = { ...state.draft, major: $('planMajor').value.trim(), cohort_year: $('planYear').valueAsNumber, reviewed: true };
   try {
     validatePlan(plan, { active: true });
-    const key = planKey(plan, type);
-    plans.set(key, { plan, type });
+    const key = planKey(plan.cohort_year, plan.major);
+    const replacing = plans.has(key);
+    plans.set(key, plan);
     discardDraft();
     clearResult();
-    refreshPlans(key);
-    if (type === 'local') {
-      const localPlans = [...plans.values()].filter(entry => entry.type === 'local').map(entry => entry.plan);
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(localPlans));
-      } catch {
-        status('planStatus', '方案已启用。浏览器存储不可用，刷新后需重新导入。');
-        return;
-      }
+    refreshPlans();
+    try {
+      localStorage.setItem(storageKey, JSON.stringify([...plans.values()]));
+    } catch {
+      status('planStatus', '方案已启用。浏览器存储不可用，刷新后需重新导入。');
+      return;
     }
-    status('planStatus', `${plan.cohort_year}级 ${plan.major}培养方案已启用。`);
+    status('planStatus', `${planLabel(plan)}培养方案已${replacing ? '更新' : '启用'}。`);
   } catch (error) {
     status('planStatus', error.message, true);
   }
 }
 
-function setRecords(files, demo = false) {
+function setRecords(files) {
   state.records = files;
-  state.demoRecords = demo;
   $('clearRecords').hidden = !files.length;
   $('recordStatus').textContent = files.length ? files.map(file => file.name).join('、') : '支持教务导出的文字型 PDF，可选择多个文件。';
   clearResult();
   updateControls();
 }
 
-async function readDemoFile(path, name) {
-  const response = await fetch(path);
-  if (!response.ok) throw new Error('演示文件暂不可用，请刷新重试。');
-  return new File([await response.blob()], name, { type: 'application/pdf' });
-}
-
-async function loadDemo() {
-  state.busy = true;
-  updateControls();
-  status('planStatus', '正在载入演示材料…');
-  try {
-    const [file, records] = await Promise.all([
-      readDemoFile('./demo/plan.pdf', '演示培养方案.pdf'),
-      readDemoFile('./demo/records.pdf', '演示修业记录.pdf'),
-    ]);
-    const plan = await parsePlan(file);
-    $('auditForm').elements.mode.value = 'recommendation';
-    if (![...$('term').options].some(option => option.value === demoTerm)) $('term').add(new Option(auditTermLabel(demoTerm), demoTerm));
-    $('term').value = demoTerm;
-    setRecords([records], true);
-    $('planSelect').value = '';
-    renderActivePlan();
-    updateMode();
-    showDraft(plan, true);
-  } catch (error) {
-    status('planStatus', error.message, true);
-  } finally {
-    state.busy = false;
-    updateControls();
-  }
-}
-
 const isPass = student => student.stage === '毕业' || student.stage === '√';
 
 function renderResult() {
-  const { students, plan, skipped, mode, term, isDemo } = state.result;
+  const { students, applied_plans, skipped_students, mode, term } = state.result;
   const passing = students.filter(isPass).length;
   const label = mode === 'graduation' ? '毕业预审' : auditTermLabel(term) + '末 · 推免';
-  $('resultContext').textContent = `${isDemo ? '模拟案例 · ' : ''}${label} · ${plan.cohort_year}级 ${plan.major}`;
+  $('resultContext').textContent = `${label} · 已匹配 ${applied_plans.length} 份培养方案`;
   const summary = `${students.length} 人已核查 · ${passing} 人达到本次规则 · ${students.length - passing} 人待复核`;
   const rows = students.map((student, index) => {
     const issues = [...student.required_issues, ...student.elective_issues,
       ...(student.flag_results || []).filter(flag => !flag.ok).map(flag => `${flag.name}：${flag.value}`)];
     const subject = issues[0] || student.outcome_reason;
     return `<tr><td><strong>${escape(student.name)}</strong><br><span class="hint">${escape(student.sid)}</span></td>
+      <td>${escape(planLabel(student.rule_meta))}</td>
       <td><span class="pill ${isPass(student) ? '' : 'warn'}">${isPass(student) ? '达到本次规则' : '待复核'}</span></td>
       <td>${escape(subject)}${issues.length > 1 ? ` <span class="hint">等 ${issues.length} 项</span>` : ''}</td>
       <td><button class="text-button" type="button" data-index="${index}" aria-label="查看${escape(student.name)}的明细">查看明细</button></td></tr>`;
   }).join('');
-  $('results').innerHTML = `<p><strong>${summary}</strong></p>${skipped.length ? `<p class="notice">${skipped.length} 名学生的专业或年级与当前方案不匹配，需另选方案审查。</p>` : ''}
-    ${students.length ? `<div class="table-scroll"><table><thead><tr><th scope="col">学生</th><th scope="col">学业核查</th><th scope="col">主要依据或缺口</th><th scope="col">明细</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
+  const unmatched = describeUnmatched(skipped_students);
+  $('results').innerHTML = `<p><strong>${summary}</strong></p>${unmatched ? `<p class="notice">${escape(unmatched)}</p>` : ''}
+    ${students.length ? `<div class="table-scroll"><table><thead><tr><th scope="col">学生</th><th scope="col">采用方案</th><th scope="col">学业核查</th><th scope="col">主要依据或缺口</th><th scope="col">明细</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}`;
   $('results').hidden = false;
-  $('exportBtn').hidden = !students.length;
+  $('exportBtn').hidden = false;
   $('resultsHeading').focus();
 }
 
 function showDetail(index) {
-  const { students, plan, mode } = state.result;
+  const { students, mode } = state.result;
   const student = students[index];
+  const plan = plans.get(planKey(student.cohort, student.major));
   const courseSources = new Map(plan.courses.map(course => [course.code, course.page]));
   const courses = student.mandatory.map(course => {
     const rulePage = courseSources.get(course.code);
@@ -251,7 +195,7 @@ function showDetail(index) {
   const flags = (student.flag_results || []).map(flag => [flag.name, flag.value, flag.ok ? '达到要求' : '待复核']);
   const pending = plan.notes.filter(note => note.decision === 'pending').length;
   $('detailTitle').textContent = student.name + ' · 审查明细';
-  $('detailMeta').textContent = `${student.file} · 第 ${student.start_page}–${student.end_page} 页`;
+  $('detailMeta').textContent = `${planLabel(plan)} · ${plan.source}｜${student.file} · 第 ${student.start_page}–${student.end_page} 页`;
   $('detailBody').innerHTML = `<p class="notice${isPass(student) ? '' : ' error'}">${escape(student.outcome_reason)}</p>`
     + (courses.length ? `<h3>课程与计次</h3>${table(['项目', '状态', '依据', '页码'], courses)}` : '')
     + (modules.length ? `<h3>模块学分</h3>${table(['模块', '要求', '已获', '缺口', '欠修门数', '状态', '修业页码'], modules)}` : '')
@@ -262,9 +206,7 @@ function showDetail(index) {
 
 async function runAudit(event) {
   event.preventDefault();
-  const entry = plans.get($('planSelect').value);
-  if (!entry || !state.records.length || state.busy) return;
-  const { plan, type } = entry;
+  if (!plans.size || !state.records.length || state.busy) return;
   const mode = isGraduation() ? 'graduation' : 'recommendation';
   const term = mode === 'graduation' ? FULL_AUDIT : $('term').value;
   const cutoff = parseAuditTerm(term);
@@ -273,7 +215,7 @@ async function runAudit(event) {
   state.busy = true;
   updateControls();
   try {
-    const parser = new StudentParser({ majors: [plan.major] });
+    const parser = new StudentParser({ matchMajor: (major, cohort) => plans.get(planKey(cohort, major))?.major });
     for (const file of state.records) {
       parser.startFile(file.name);
       await readPdf(file, (items, page, width, total) => {
@@ -281,14 +223,16 @@ async function runAudit(event) {
         parser.page(items, page, width);
       });
     }
-    const matches = parser.finish();
-    const validYear = student => Number(student.cohort) === plan.cohort_year;
-    const skipped = [...parser.skipped, ...matches.filter(student => !validYear(student))];
-    const students = matches.filter(validYear).map(student => reviewStudent(student, plan, cutoff));
+    const usedPlans = new Map();
+    const students = parser.finish().map(student => {
+      const key = planKey(student.cohort, student.major);
+      const plan = plans.get(key);
+      usedPlans.set(key, plan);
+      return reviewStudent(student, plan, cutoff);
+    });
+    const skipped = [...new Map(parser.skipped.map(student => [student.sid, student])).values()];
     state.result = {
-      mode, term, plan, students, skipped, skipped_students: skipped, sources, isDemo: type === 'demo' && state.demoRecords,
-      plans: { [plan.major]: plan },
-      rule_selection: { grade_name: `${plan.cohort_year}级`, revision: 0, majors: [{ major: plan.major, name: plan.source, version: 1 }] },
+      mode, term, students, skipped_students: skipped, sources, applied_plans: [...usedPlans.values()],
     };
     renderResult();
     status('auditStatus', '');
@@ -333,7 +277,6 @@ async function exportWorkbook() {
   }
 }
 
-$('demoBtn').addEventListener('click', loadDemo);
 $('choosePlan').addEventListener('click', () => $('planInput').click());
 $('planInput').addEventListener('change', async event => {
   const file = event.target.files[0];
@@ -354,10 +297,6 @@ $('planPreview').addEventListener('submit', storePlan);
 $('discardPlan').addEventListener('click', () => {
   discardDraft();
   status('planStatus', '');
-});
-$('planSelect').addEventListener('change', () => {
-  clearResult();
-  renderActivePlan();
 });
 $('chooseRecords').addEventListener('click', () => $('recordsInput').click());
 $('recordsInput').addEventListener('change', event => {
@@ -384,4 +323,4 @@ $('exportBtn').addEventListener('click', exportWorkbook);
 for (const option of auditTermOptions()) if (option.value !== FULL_AUDIT) $('term').add(new Option(option.label, option.value));
 $('term').value = defaultAuditTerm();
 updateMode();
-void loadPlans();
+loadPlans();

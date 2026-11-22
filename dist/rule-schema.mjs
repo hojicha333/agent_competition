@@ -1,6 +1,8 @@
 // 培养规则是数据，不执行上传文件中的代码。
 export const RULE_SCHEMA=2;
 export const normalize=s=>String(s??'').normalize('NFKC').replace(/\s+/g,'').replaceAll('Ⅰ','I').replaceAll('Ⅱ','II');
+export const planKey=(year,major)=>JSON.stringify([Number(year),normalize(major)]);
+export const planLabel=({cohort_year,major})=>`${cohort_year}级 ${major}`;
 export const newId=prefix=>`${prefix}-${globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)}`;
 const list=s=>Array.isArray(s)?s:String(s||'').split(/[,，;；\n]/).map(v=>v.trim()).filter(Boolean);
 export {list as stringList};

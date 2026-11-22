@@ -4,6 +4,17 @@ import { compareAuditTerms, FULL_AUDIT } from './terms.mjs';
 export const recommendationScope = '核对截至所选学期末应通过的必修与培养类型指定课程。在修和截止学期之后的成绩不计。本次范围不含独立计次、模块学分、外语、排名等其他推免条件。';
 export const graduationScope = '核对已配置的必修、限选、模块学分、修读次数及专项。在修、无成绩的毕业论文等需要复核。';
 
+export function describeUnmatched(students) {
+  if (!students.length) return '';
+  const groups = new Map();
+  for (const student of students) {
+    const label = `${student.cohort ? student.cohort + '级' : '年级未识别'} ${student.major}`;
+    groups.set(label, (groups.get(label) || 0) + 1);
+  }
+  const details = [...groups].map(([label, count]) => `${label} ${count} 人`).join('、');
+  return `未匹配培养方案 ${students.length} 人，已跳过（${details}）。请核对修业记录的年级和专业，或补充对应方案。`;
+}
+
 export function reviewStudent(student, plan, cutoff) {
   if (cutoff === FULL_AUDIT) return auditStudent(student, plan, cutoff);
 

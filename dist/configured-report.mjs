@@ -1,6 +1,6 @@
-import {normalize} from './rule-schema.mjs?v=20261104-rows1';
+import {normalize,planLabel} from './rule-schema.mjs?v=20261104-rows1';
 import {courseCheckHeaders,courseCheckValues,phaseCourseChecks} from './course-checks.mjs?v=20261104-rows1';
-import {graduationScope,recommendationScope} from './review.mjs';
+import {describeUnmatched,graduationScope,recommendationScope} from './review.mjs';
 export function moduleColumns(students){
   const result=new Map();for(const s of students)for(const m of s.module_results||[])if(m.show_in_summary)result.set(normalize(m.name),{key:normalize(m.name),name:m.name,role:m.role});return [...result.values()];
 }
@@ -8,21 +8,21 @@ export function flagColumns(students){const result=new Map();for(const s of stud
 export const studentModule=(s,column)=>(s.module_results||[]).find(m=>normalize(m.name)===column.key);
 export const studentFlag=(s,column)=>(s.flag_results||[]).find(f=>normalize(f.name)===column.key);
 export function skippedScopeNote(data){
-  const skipped=[...new Map((data.skipped_students||[]).map(s=>[s.sid,s])).values()];if(!skipped.length)return null;
-  const groups=new Map();for(const s of skipped)groups.set(s.major,(groups.get(s.major)||0)+1);
-  return `仅核查与当前培养方案年级、专业匹配的学生，跳过${skipped.length}人（${[...groups].map(([name,n])=>name+' '+n+'人').join('、')}）。`;
+  return describeUnmatched(data.skipped_students||[])||null;
 }
 export function configuredWorkbookRows(data,sortStudents){
   const final=data.term==='all',recommendation=data.mode==='recommendation',students=sortStudents(data.students),modules=moduleColumns(students),flags=flagColumns(students),selection=data.rule_selection;
-  const label=selection?.grade_name||'所选培养规则',version=selection?.revision??0;
-  const summary=[['姓名','学号','专业','审查判断',...courseCheckHeaders(data.term),...modules.map(m=>m.name),...flags.map(f=>f.name),'其他限选/指定课',...modules.flatMap(m=>[`${m.name}已获/认可`,`${m.name}阶段缺口`]),...(!final?['此前课程问题','本学期课程问题']:[]),'必修/计次问题','限选及实践问题','判断依据','采用培养规则','规则库版本','补充说明','来源页码']];
+  const batch=Array.isArray(data.applied_plans);
+  const label=batch?'按年级和专业自动匹配':selection?.grade_name||'所选培养规则',version=selection?.revision??0;
+  const summary=[['姓名','学号','专业','审查判断',...courseCheckHeaders(data.term),...modules.map(m=>m.name),...flags.map(f=>f.name),'其他限选/指定课',...modules.flatMap(m=>[`${m.name}已获/认可`,`${m.name}阶段缺口`]),...(!final?['此前课程问题','本学期课程问题']:[]),'必修/计次问题','限选及实践问题','判断依据','采用培养规则',batch?'培养方案来源':'规则库版本','补充说明','来源页码']];
   const courses=[['姓名','学号','专业','模块','课程代码','课程名称','学分','应修/记录学期','审查状态','成绩/备注依据','来源']];
   const credits=[['姓名','学号','专业','模块','要求学分','已获/认可','豁免学分','在修学分','本阶段需补','子模块/最低门数要求','判定','来源']];
   const history=[['姓名','学号','专业','核对项目','要求数量/学分','已通过/认可','有修读记录','缺修读记录','单位','记录依据']];
   for(const s of students){
     const majorRule=selection?.majors.find(m=>m.major===s.major);
     const checks=phaseCourseChecks(s,data.term);
-    summary.push([s.name,s.sid,s.major,s.stage,...courseCheckValues(s,data.term),...modules.map(col=>{const m=studentModule(s,col);return m?m.status==='×'?'×':'√':'不适用';}),...flags.map(col=>{const f=studentFlag(s,col);return f?f.ok?'√':String(f.value):'不适用';}),s.elective_issues.length?'×':'√',...modules.flatMap(col=>{const m=studentModule(s,col);return m?[m.credited,m.uncovered]:[null,null];}),...(!final?[checks.previous_issues.join('\n')||'无',checks.current_issues.join('\n')||'无']:[]),s.required_issues.join('\n')||'无',s.elective_issues.join('\n')||'无',s.outcome_reason,majorRule?`${label} / ${majorRule.name} v${majorRule.version}`:label,version,s.notes.join('\n'),`${s.file} 第${s.start_page}-${s.end_page}页`]);
+    const applied=batch?[planLabel(s.rule_meta),s.rule_meta.source]:[majorRule?`${label} / ${majorRule.name} v${majorRule.version}`:label,version];
+    summary.push([s.name,s.sid,s.major,s.stage,...courseCheckValues(s,data.term),...modules.map(col=>{const m=studentModule(s,col);return m?m.status==='×'?'×':'√':'不适用';}),...flags.map(col=>{const f=studentFlag(s,col);return f?f.ok?'√':String(f.value):'不适用';}),s.elective_issues.length?'×':'√',...modules.flatMap(col=>{const m=studentModule(s,col);return m?[m.credited,m.uncovered]:[null,null];}),...(!final?[checks.previous_issues.join('\n')||'无',checks.current_issues.join('\n')||'无']:[]),s.required_issues.join('\n')||'无',s.elective_issues.join('\n')||'无',s.outcome_reason,...applied,s.notes.join('\n'),`${s.file} 第${s.start_page}-${s.end_page}页`]);
     for(const c of s.mandatory)courses.push([s.name,s.sid,s.major,c.category,c.code,c.name,c.credits,c.schedule,c.state,c.evidence,c.page?`${s.file} 第${c.page}页`:'无课程记录']);
     const seen=new Set();
     for(const m of s.module_results){
@@ -40,19 +40,24 @@ export function configuredWorkbookRows(data,sortStudents){
       ['数据','修业 PDF 与 Excel 仅在浏览器内处理。','网站运行方式']);
     for(const row of summary.slice(1))row[3]=['毕业','√'].includes(row[3])?'达到本次规则':'待复核';
   }
-  for(const [major,p]of Object.entries(data.plans)){
-    rules.push([major,`入学年级${p.cohort_year}；来源${p.source}`,p.source]);
-    for(const m of recommendation?[]:p.modules)rules.push([`${major}/${m.name}`,`最低${m.required}学分；对应修业分组：${m.groups.join('、')}；${m.course_scope==='listed'?'仅列出课程及明确替代':'按教务认可学分'}；${m.children.map(c=>`${c.name}≥${c.required}`).join('；')}`,m.source?`${m.source} 第${m.page}页`:'已保存规则']);
-    for(const r of recommendation?[]:p.repetitions)rules.push([`${major}/${r.name}`,`要求${r.required_count}次，每次${r.credits_per_attempt}学分；代码${r.codes.join('、')}；名称别名${r.names.join('、')}`,'已保存规则']);
-    for(const note of p.notes||[])rules.push([`${major}/文字提示`,`${note.text}\n识别说明：${note.binding||'原文保留供参考'}`,`${note.source} 第${note.page}页`]);
-    for(const source of p.sources||[])rules.push([`${major}/规则文件`,source.name,source.type==='standard'?'毕业标准':'培养计划']);
+  if(batch)rules[1]=['采用规则',`${label}，本次采用${data.applied_plans.length}份方案。审查范围：${final?'本科全部要求':data.term}`,'本次匹配'];
+  for(const p of data.applied_plans||Object.values(data.plans)){
+    const rule=planLabel(p);
+    rules.push([rule,`入学年级${p.cohort_year}；来源${p.source}`,p.source]);
+    for(const m of recommendation?[]:p.modules)rules.push([`${rule}/${m.name}`,`最低${m.required}学分；对应修业分组：${m.groups.join('、')}；${m.course_scope==='listed'?'仅列出课程及明确替代':'按教务认可学分'}；${m.children.map(c=>`${c.name}≥${c.required}`).join('；')}`,m.source?`${m.source} 第${m.page}页`:'已保存规则']);
+    for(const r of recommendation?[]:p.repetitions)rules.push([`${rule}/${r.name}`,`要求${r.required_count}次，每次${r.credits_per_attempt}学分；代码${r.codes.join('、')}；名称别名${r.names.join('、')}`,'已保存规则']);
+    for(const note of p.notes||[])rules.push([`${rule}/文字提示`,`${note.text}\n识别说明：${note.binding||'原文保留供参考'}`,`${note.source} 第${note.page}页`]);
+    for(const source of p.sources||[])rules.push([`${rule}/规则文件`,source.name,source.type==='standard'?'毕业标准':'培养计划']);
   }
-  if(skippedScopeNote(data))rules.push(['专业筛选及跳过说明',skippedScopeNote(data),'本次上传与所选规则']);
+  const unmatched=skippedScopeNote(data);
+  if(unmatched)rules.push(['未匹配及跳过说明',unmatched,'本次修业记录与培养方案']);
+  const skippedRows=sortStudents(data.skipped_students||[]).map(s=>[s.name,s.sid,s.cohort||'未识别',s.major,s.cohort?'未导入该年级与专业的方案':'未识别入学年级',`${s.file} 第${s.start_page}-${s.end_page}页`]);
   return [
-    {name:'审查汇总',title:`${recommendation?'推免学业审查':'毕业预审'}　${label}　${final?'本科全部要求':data.term}`,rows:summary,widths:[12,19,25,16,...(final?[14]:[27,29]),...modules.map(()=>16),...flags.map(()=>16),22,...modules.flatMap(()=>[20,20]),...(!final?[82,82]:[]),82,82,95,55,16,76,50]},
+    {name:'审查汇总',title:`${recommendation?'推免学业审查':'毕业预审'}　${label}　${final?'本科全部要求':data.term}`,rows:summary,widths:[12,19,25,16,...(final?[14]:[27,29]),...modules.map(()=>16),...flags.map(()=>16),22,...modules.flatMap(()=>[20,20]),...(!final?[82,82]:[]),82,82,95,32,batch?43:16,76,50]},
     {name:'课程审查明细',title:'按所选规则核对课程',rows:courses,widths:[12,19,25,30,25,58,12,24,28,95,55]},
     ...(recommendation?[]:[{name:'学分明细',title:'所选培养方案的模块要求与缺口',rows:credits,widths:[12,19,25,38,18,20,18,18,20,82,20,55]}]),
-    {name:'审查说明',title:'规则版本、来源及逐行文字处理',rows:rules,widths:[40,135,70]},
+    {name:'审查说明',title:'采用规则、来源及逐行文字处理',rows:rules,widths:[40,135,70]},
+    ...(batch&&skippedRows.length?[{name:'未匹配',title:'未匹配培养方案的学生',rows:[['姓名','学号','入学年级','专业','跳过原因','来源页码'],...skippedRows],widths:[12,19,15,30,45,50]}]:[]),
     ...(final?[{name:'修读记录核对',title:'区分未修读与已修读但未合格',rows:history,widths:[12,19,25,65,20,20,20,20,10,115]}]:[])
   ];
 }
